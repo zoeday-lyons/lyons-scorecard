@@ -34,7 +34,7 @@ function makeDrawer(page, font, fontBold, H) {
     page.drawRectangle({ x, y: H - y - h, width: w, height: h, color, borderWidth: 0 });
   }
   function strokeRect(x, y, w, h, color, lw=0.8) {
-    page.drawRectangle({ x, y: H - y - h, width: w, height: h, borderColor: color, borderWidth: lw, color: rgb(0,0,0,0) });
+    page.drawRectangle({ x, y: H - y - h, width: w, height: h, borderColor: color, borderWidth: lw, opacity: 1, borderOpacity: 1 });
   }
   function line(x1, y1, x2, y2, color, lw=0.5) {
     page.drawLine({ start: {x: x1, y: H - y1}, end: {x: x2, y: H - y2}, color, thickness: lw });
@@ -138,8 +138,8 @@ export default async function handler(req, res) {
     let y = 70;
 
     // Foreman info block
-    d1.fillRect(M, y, W - 2*M, 80, C.infoBg);
-    d1.strokeRect(M, y, W - 2*M, 80, C.divider);
+    p1.drawRectangle({ x: M, y: H - y - 80, width: W - 2*M, height: 80, color:
+C.infoBg, borderColor: C.divider, borderWidth: 0.8 });
     d1.text(M + 14, y + 16, foreman, 13, fontBold, C.darkText);
     d1.text(M + 14, y + 33, `Foreman  |  ${scheduleLabel}`, 9, font, C.grey);
     d1.text(M + 14, y + 52, "CURRENT JOB:", 8, font, C.lightGrey);
@@ -252,8 +252,8 @@ export default async function handler(req, res) {
     drawSectionHeader(d2, font, fontBold, M, y, W - 2*M, "ONE-ON-ONE NOTES  (Nicole / CM)");
     y += 23;
     const boxH = 792 - 18 - y - 10;
-    d2.fillRect(M, y, W - 2*M, boxH, C.notesBg);
-    d2.strokeRect(M, y, W - 2*M, boxH, C.divider, 0.8);
+    p2.drawRectangle({ x: M, y: H - y - boxH, width: W - 2*M, height: boxH, color: 
+  C.notesBg, borderColor: C.divider, borderWidth: 0.8 });
     let lineY = y + 20;
     while (lineY < y + boxH - 10) {
       d2.line(M + 11, lineY, W - M - 11, lineY, C.lightGrey, 0.5);
