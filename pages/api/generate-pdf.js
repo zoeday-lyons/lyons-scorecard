@@ -1,453 +1,271 @@
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+
 export const config = { api: { bodyParser: { sizeLimit: "2mb" } } };
 
-// Colours
-const FOREST_GREEN = [45, 80, 22];
-const MID_GREEN = [58, 102, 32];
-const BADGE_ON = [45, 125, 70];
-const BADGE_NEEDS = [212, 130, 10];
-const BADGE_BELOW = [192, 57, 43];
-const DIVIDER = [200, 221, 184];
-const DARK_TEXT = [26, 46, 13];
-const ROW_ALT = [242, 247, 238];
-const SUBHEAD_BG = [232, 242, 224];
-const FLAG_RED = [192, 57, 43];
+const C = {
+  forestGreen: rgb(45/255, 80/255, 22/255),
+  midGreen:    rgb(58/255, 102/255, 32/255),
+  badgeOn:     rgb(45/255, 125/255, 70/255),
+  badgeNeeds:  rgb(212/255, 130/255, 10/255),
+  badgeBelow:  rgb(192/255, 57/255, 43/255),
+  divider:     rgb(200/255, 221/255, 184/255),
+  darkText:    rgb(26/255, 46/255, 13/255),
+  rowAlt:      rgb(242/255, 247/255, 238/255),
+  subheadBg:   rgb(232/255, 242/255, 224/255),
+  flagRed:     rgb(192/255, 57/255, 43/255),
+  white:       rgb(1, 1, 1),
+  grey:        rgb(0.53, 0.53, 0.53),
+  lightGrey:   rgb(0.87, 0.87, 0.87),
+  infoBg:      rgb(247/255, 250/255, 244/255),
+  notesBg:     rgb(250/255, 253/255, 248/255),
+};
 
 function getBadge(pct) {
-  if (pct >= 0.8) return [BADGE_ON, "ON TRACK"];
-  if (pct >= 0.5) return [BADGE_NEEDS, "NEEDS IMPROVEMENT"];
-  return [BADGE_BELOW, "BELOW TARGET"];
+  if (pct >= 0.8)  return [C.badgeOn,    "ON TRACK"];
+  if (pct >= 0.5)  return [C.badgeNeeds, "NEEDS IMPROVEMENT"];
+  return                   [C.badgeBelow, "BELOW TARGET"];
 }
 
-// We generate PDF server-side using a minimal PDF builder
-// (raw PDF syntax — no external lib needed, keeps bundle small)
+// pdf-lib y=0 is bottom of page. Helper to flip from top-down coords.
+function makeDrawer(page, font, fontBold, H) {
+  const W = page.getWidth();
 
-function rgb(r, g, b) { return `${(r/255).toFixed(3)} ${(g/255).toFixed(3)} ${(b/255).toFixed(3)}`; }
-
-class PDFDoc {
-  constructor() {
-    this.pages = [];
-    this.currentPage = null;
-    this.W = 612; // letter width pts
-    this.H = 792; // letter height pts
-    this.objects = [];
-    this.objCount = 0;
-    this.fontRef = null;
-    this.fontBoldRef = null;
+  function fillRect(x, y, w, h, color) {
+    page.drawRectangle({ x, y: H - y - h, width: w, height: h, color, borderWidth: 0 });
+  }
+  function strokeRect(x, y, w, h, color, lw=0.8) {
+    page.drawRectangle({ x, y: H - y - h, width: w, height: h, borderColor: color, borderWidth: lw, color: rgb(0,0,0,0) });
+  }
+  function line(x1, y1, x2, y2, color, lw=0.5) {
+    page.drawLine({ start: {x: x1, y: H - y1}, end: {x: x2, y: H - y2}, color, thickness: lw });
+  }
+  function text(x, y, str, size, f, color) {
+    page.drawText(String(str), { x, y: H - y - size * 0.75, font: f, size, color });
+  }
+  function textCentered(cx, y, str, size, f, color) {
+    const w = f.widthOfTextAtSize(String(str), size);
+    text(cx - w/2, y, str, size, f, color);
+  }
+  function textRight(rx, y, str, size, f, color) {
+    const w = f.widthOfTextAtSize(String(str), size);
+    text(rx - w, y, str, size, f, color);
   }
 
-  addObj(content) {
-    this.objCount++;
-    this.objects.push({ id: this.objCount, content });
-    return this.objCount;
-  }
-
-  newPage() {
-    const streams = [];
-    const page = { streams, num: this.pages.length + 1 };
-    this.pages.push(page);
-    this.currentPage = page;
-  }
-
-  op(s) { this.currentPage.streams.push(s); }
-
-  setFill(r, g, b) { this.op(`${rgb(r,g,b)} rg`); }
-  setStroke(r, g, b) { this.op(`${rgb(r,g,b)} RG`); }
-  setLineWidth(w) { this.op(`${w} w`); }
-
-  rect(x, y, w, h, fill=true, stroke=false) {
-    this.op(`${x} ${y} ${w} ${h} re`);
-    if (fill && stroke) this.op("B");
-    else if (fill) this.op("f");
-    else this.op("S");
-  }
-
-  line(x1, y1, x2, y2) {
-    this.op(`${x1} ${y1} m ${x2} ${y2} l S`);
-  }
-
-  setFont(bold, size) {
-    const f = bold ? "F2" : "F1";
-    this.op(`/${f} ${size} Tf`);
-  }
-
-  text(x, y, str) {
-    const escaped = String(str)
-      .replace(/\\/g, "\\\\")
-      .replace(/\(/g, "\\(")
-      .replace(/\)/g, "\\)")
-      .replace(/[^\x20-\x7E]/g, "?"); // strip non-ASCII (checkmarks etc)
-    this.op(`BT ${x} ${y} Td (${escaped}) Tj ET`);
-  }
-
-  textCentered(cx, y, str, approxCharWidth) {
-    const s = String(str).replace(/[^\x20-\x7E]/g, "?");
-    const w = s.length * approxCharWidth;
-    this.text(cx - w/2, y, s);
-  }
-
-  textRight(rx, y, str, approxCharWidth) {
-    const s = String(str).replace(/[^\x20-\x7E]/g, "?");
-    const w = s.length * approxCharWidth;
-    this.text(rx - w, y, s);
-  }
-
-  build() {
-    // Font objects
-    const f1 = this.addObj(
-      `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>`
-    );
-    const f2 = this.addObj(
-      `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>`
-    );
-    const resources = this.addObj(
-      `<< /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >> >>`
-    );
-
-    const pageObjs = [];
-    for (const page of this.pages) {
-      const stream = page.streams.join("\n");
-      const streamObj = this.addObj(
-        `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`
-      );
-      const pageObj = this.addObj(
-        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${this.W} ${this.H}] /Contents ${streamObj} 0 R /Resources ${resources} 0 R >>`
-      );
-      pageObjs.push(pageObj);
-    }
-
-    const pageTree = `<< /Type /Pages /Kids [${pageObjs.map(n=>`${n} 0 R`).join(" ")}] /Count ${pageObjs.length} >>`;
-    // Insert page tree as obj 2
-    this.objects.splice(1, 0, { id: 2, content: pageTree });
-    // Re-number
-    this.objects = this.objects.map((o,i) => ({ ...o, id: i+1 }));
-
-    const catalog = `<< /Type /Catalog /Pages 2 0 R >>`;
-
-    let out = "%PDF-1.4\n";
-    const offsets = [];
-    // obj 1 = catalog
-    offsets.push(out.length);
-    out += `1 0 obj\n${catalog}\nendobj\n`;
-
-    for (let i = 1; i < this.objects.length; i++) {
-      const o = this.objects[i];
-      offsets.push(out.length);
-      out += `${o.id} 0 obj\n${o.content}\nendobj\n`;
-    }
-
-    const xrefOffset = out.length;
-    const total = this.objects.length + 1;
-    out += `xref\n0 ${total}\n0000000000 65535 f \n`;
-    for (const off of offsets) {
-      out += String(off).padStart(10, "0") + " 00000 n \n";
-    }
-    out += `trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-    return out;
-  }
+  return { fillRect, strokeRect, line, text, textCentered, textRight, W };
 }
 
-function drawHeader(doc, pageNum, weekLabel) {
-  const W = doc.W, H = doc.H;
-  const M = 39.6; // 0.55in
-
-  doc.setFill(...FOREST_GREEN);
-  doc.rect(0, H - 61, W, 61);
-
-  doc.setFill(255, 255, 255);
-  doc.setFont(true, 22);
-  doc.text(M, H - 35, "LYONS");
-  doc.setFont(false, 8);
-  doc.text(M, H - 47, "LANDSCAPING");
-
-  doc.setFont(true, 14);
-  doc.textCentered(W/2, H - 30, "FOREMAN PERFORMANCE SCORECARD", 8);
-  doc.setFont(false, 8.5);
-  doc.textCentered(W/2, H - 42, `Week of ${weekLabel}`, 5);
-
-  doc.setFont(false, 8);
-  doc.textRight(W - M, H - 36, `Page ${pageNum} of 2`, 4.5);
+function drawHeader(d, font, fontBold, weekLabel, pageNum) {
+  const { fillRect, text, textCentered, textRight, W } = d;
+  fillRect(0, 0, W, 61, C.forestGreen);
+  text(39.6, 14, "LYONS", 22, fontBold, C.white);
+  text(39.6, 40, "LANDSCAPING", 8, font, rgb(0.66, 0.79, 0.54));
+  textCentered(W/2, 18, "FOREMAN PERFORMANCE SCORECARD", 14, fontBold, C.white);
+  textCentered(W/2, 36, `Week of ${weekLabel}`, 8.5, font, C.white);
+  textRight(W - 39.6, 22, `Page ${pageNum} of 2`, 8, font, C.white);
 }
 
-function drawFooter(doc) {
-  const W = doc.W;
-  doc.setFill(...FOREST_GREEN);
-  doc.rect(0, 0, W, 22);
-  doc.setFill(255, 255, 255);
-  doc.setFont(false, 7);
-  doc.textCentered(W/2, 7, "Lyons Landscaping  |  Foreman Performance Scorecard  |  Confidential", 4);
+function drawFooter(d, font) {
+  const { fillRect, textCentered, W } = d;
+  fillRect(0, 774, W, 18, C.forestGreen);
+  textCentered(W/2, 778, "Lyons Landscaping  |  Foreman Performance Scorecard  |  Confidential", 7, font, C.white);
 }
 
-function drawSectionHeader(doc, x, y, w, text) {
-  doc.setFill(...SUBHEAD_BG);
-  doc.rect(x, y - 1, w, 20);
-  doc.setFill(...FOREST_GREEN);
-  doc.rect(x, y - 1, 3, 20);
-  doc.setFill(...DARK_TEXT);
-  doc.setFont(true, 9);
-  doc.text(x + 8, y + 5, text);
+function drawSectionHeader(d, font, fontBold, x, y, w, label) {
+  const { fillRect, text } = d;
+  fillRect(x, y, w, 20, C.subheadBg);
+  fillRect(x, y, 3, 20, C.forestGreen);
+  text(x + 9, y + 5, label, 9, fontBold, C.forestGreen);
 }
 
-function drawPctBar(doc, x, y, pct, w=79, h=9) {
-  doc.setFill(217, 232, 206);
-  doc.rect(x, y, w, h);
+function drawPctBar(d, x, y, pct, bw=79, bh=9) {
+  const { fillRect } = d;
+  fillRect(x, y, bw, bh, rgb(0.85, 0.91, 0.81));
   if (pct > 0) {
     const [col] = getBadge(pct);
-    doc.setFill(...col);
-    doc.rect(x, y, w * pct, h);
+    fillRect(x, y, bw * pct, bh, col);
   }
 }
 
-function drawBadge(doc, x, y, pct) {
+function drawBadge(d, font, x, y, pct) {
+  const { fillRect, textCentered } = d;
   const [col, txt] = getBadge(pct);
-  const bw = 104, bh = 16;
-  doc.setFill(...col);
-  doc.rect(x, y, bw, bh);
-  doc.setFill(255, 255, 255);
-  doc.setFont(true, 7);
-  doc.textCentered(x + bw/2, y + 5, txt, 5);
+  const bw = 110, bh = 16;
+  fillRect(x, y, bw, bh, col);
+  textCentered(x + bw/2, y + 4, txt, 7, font, C.white);
 }
 
-function drawComplianceRow(doc, x, y, label, submitted, total, isAlt) {
-  const W = doc.W;
+function drawComplianceRow(d, font, fontBold, x, y, label, submitted, total, isAlt) {
+  const { fillRect, text, line, W } = d;
   const M = 39.6;
   const rw = W - 2*M;
   const rh = 27;
 
-  doc.setFill(...(isAlt ? ROW_ALT : [255,255,255]));
-  doc.rect(x, y, rw, rh);
+  fillRect(x, y, rw, rh, isAlt ? C.rowAlt : C.white);
 
   const pct = total > 0 ? submitted / total : 0;
-
-  doc.setFill(...DARK_TEXT);
-  doc.setFont(false, 9);
-  doc.text(x + 8, y + 10, label);
+  text(x + 8, y + 9, label, 9, font, C.darkText);
 
   const cx = x + rw * 0.50;
-  doc.setFont(true, 9);
-  doc.text(cx, y + 10, `${submitted}/${total}`);
+  text(cx, y + 9, `${submitted}/${total}`, 9, fontBold, C.darkText);
+  text(cx + 28, y + 9, `${Math.round(pct*100)}%`, 8.5, font, C.grey);
+  drawPctBar(d, cx + 54, y + 9, pct);
+  drawBadge(d, font, x + rw - 114, y + 6, pct);
 
-  doc.setFill(85, 85, 85);
-  doc.setFont(false, 8.5);
-  doc.text(cx + 27, y + 10, `${Math.round(pct*100)}%`);
-
-  drawPctBar(doc, cx + 52, y + 6, pct);
-
-  const bw = 104;
-  drawBadge(doc, x + rw - bw - 4, y + 5, pct);
-
-  doc.setStroke(...DIVIDER);
-  doc.setLineWidth(0.5);
-  doc.line(x, y, x + rw, y);
+  line(x, y + rh, x + rw, y + rh, C.divider, 0.5);
 }
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
     const {
       foreman, scheduleLabel, weekLabel, workingDays,
-      forms, dailyBreakdown, flags, dayLabels
+      forms, dailyBreakdown, flags, dayLabels,
     } = req.body;
 
-    const doc = new PDFDoc();
-    const W = doc.W, H = doc.H;
+    const pdfDoc = await PDFDocument.create();
+    const font     = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const W = 612, H = 792;
     const M = 39.6;
 
-    // ── PAGE 1 ──
-    doc.newPage();
-    drawHeader(doc, 1, weekLabel);
-    drawFooter(doc);
+    // ── PAGE 1 ──────────────────────────────────────────────────
+    const p1 = pdfDoc.addPage([W, H]);
+    const d1 = makeDrawer(p1, font, fontBold, H);
+    drawHeader(d1, font, fontBold, weekLabel, 1);
+    drawFooter(d1, font);
 
-    let y = H - 76;
+    let y = 70;
 
     // Foreman info block
-    doc.setFill(247, 250, 244);
-    doc.rect(M, y - 76, W - 2*M, 76);
-    doc.setStroke(...DIVIDER);
-    doc.setLineWidth(1);
-    doc.rect(M, y - 76, W - 2*M, 76, false, true);
+    d1.fillRect(M, y, W - 2*M, 80, C.infoBg);
+    d1.strokeRect(M, y, W - 2*M, 80, C.divider);
+    d1.text(M + 14, y + 16, foreman, 13, fontBold, C.darkText);
+    d1.text(M + 14, y + 33, `Foreman  |  ${scheduleLabel}`, 9, font, C.grey);
+    d1.text(M + 14, y + 52, "CURRENT JOB:", 8, font, C.lightGrey);
+    d1.line(M + 80, y + 56, W - M - 230, y + 56, C.lightGrey, 0.6);
 
-    doc.setFill(...DARK_TEXT);
-    doc.setFont(true, 13);
-    doc.text(M + 14, y - 20, foreman);
-    doc.setFont(false, 9);
-    doc.setFill(85, 85, 85);
-    doc.text(M + 14, y - 34, `Foreman  |  ${scheduleLabel}`);
-
-    doc.setFont(false, 8);
-    doc.setFill(136, 136, 136);
-    doc.text(M + 14, y - 50, "CURRENT JOB:");
-    doc.setStroke(170, 170, 170);
-    doc.setLineWidth(0.6);
-    doc.line(M + 73, y - 49, W - M - 230, y - 49);
-
-    // Chips
     const chipData = [
-      ["Schedule", dayLabels[0].split(" ")[0] + "-" + dayLabels[dayLabels.length-1].split(" ")[0]],
-      ["Working Days", String(workingDays)],
-      ["Week", weekLabel],
+      ["SCHEDULE", dayLabels[0].split(" ")[0] + "-" + dayLabels[dayLabels.length-1].split(" ")[0]],
+      ["WORKING DAYS", String(workingDays)],
+      ["WEEK", weekLabel],
     ];
-    let chipX = W - M - 259;
+    let chipX = W - M - 260;
     for (const [label, val] of chipData) {
-      doc.setFont(false, 7.5);
-      doc.setFill(136, 136, 136);
-      doc.text(chipX, y - 22, label.toUpperCase());
-      doc.setFont(true, 9);
-      doc.setFill(...DARK_TEXT);
-      doc.text(chipX, y - 34, val);
-      chipX += 71;
+      d1.text(chipX, y + 22, label, 7.5, font, C.grey);
+      d1.text(chipX, y + 36, val, 9, fontBold, C.darkText);
+      chipX += 88;
     }
 
-    y -= 86;
+    y += 90;
 
-    // Compliance rows
-    drawSectionHeader(doc, M, y, W - 2*M, "FORM COMPLIANCE");
-    y -= 24;
+    // Compliance section
+    drawSectionHeader(d1, font, fontBold, M, y, W - 2*M, "FORM COMPLIANCE");
+    y += 24;
 
     let totalSub = 0, totalPos = 0;
     for (let i = 0; i < forms.length; i++) {
       const { label, submitted, possible } = forms[i];
-      drawComplianceRow(doc, M, y, label, submitted, possible, i % 2 === 0);
+      drawComplianceRow(d1, font, fontBold, M, y, label, submitted, possible, i % 2 === 0);
       totalSub += submitted;
       totalPos += possible;
-      y -= 29;
+      y += 29;
     }
 
-    y -= 14;
+    y += 14;
 
-    // Overall score block
+    // Overall score
     const overallPct = totalPos > 0 ? totalSub / totalPos : 0;
-    doc.setFill(...FOREST_GREEN);
-    doc.rect(M, y - 72, W - 2*M, 72);
-    doc.setFill(255, 255, 255);
-    doc.setFont(true, 11);
-    doc.text(M + 14, y - 20, "OVERALL COMPLIANCE SCORE");
-    doc.setFont(false, 9);
-    doc.text(M + 14, y - 34, `${totalSub} of ${totalPos} submissions completed`);
-    doc.setFont(true, 26);
-    doc.textRight(W - M - 14, y - 36, `${Math.round(overallPct*100)}%`, 15);
-
+    const scoreH = 72;
+    d1.fillRect(M, y, W - 2*M, scoreH, C.forestGreen);
+    d1.text(M + 14, y + 18, "OVERALL COMPLIANCE SCORE", 11, fontBold, C.white);
+    d1.text(M + 14, y + 34, `${totalSub} of ${totalPos} submissions completed`, 9, font, C.white);
+    d1.textRight(W - M - 14, y + 20, `${Math.round(overallPct*100)}%`, 26, fontBold, C.white);
     const [badgeCol, badgeTxt] = getBadge(overallPct);
-    const bw = 104;
-    doc.setFill(...badgeCol);
-    doc.rect(W - M - 14 - bw, y - 62, bw, 16);
-    doc.setFill(255, 255, 255);
-    doc.setFont(true, 7);
-    doc.textCentered(W - M - 14 - bw/2, y - 57, badgeTxt, 5);
+    const bw = 110;
+    d1.fillRect(W - M - 14 - bw, y + 46, bw, 16, badgeCol);
+    d1.textCentered(W - M - 14 - bw/2, y + 50, badgeTxt, 7, font, C.white);
 
-    // ── PAGE 2 ──
-    doc.newPage();
-    drawHeader(doc, 2, weekLabel);
-    drawFooter(doc);
+    // ── PAGE 2 ──────────────────────────────────────────────────
+    const p2 = pdfDoc.addPage([W, H]);
+    const d2 = makeDrawer(p2, font, fontBold, H);
+    drawHeader(d2, font, fontBold, weekLabel, 2);
+    drawFooter(d2, font);
 
-    y = H - 76;
+    y = 70;
 
     // Daily breakdown
-    drawSectionHeader(doc, M, y, W - 2*M, "DAILY BREAKDOWN - FORM SUBMISSIONS");
-    y -= 23;
+    drawSectionHeader(d2, font, fontBold, M, y, W - 2*M, "DAILY BREAKDOWN - FORM SUBMISSIONS");
+    y += 23;
 
-    const numDays = dayLabels.length;
-    const labelColW = 165;
-    const dayColW = (W - 2*M - labelColW) / numDays;
+    const labelColW = 160;
+    const dayColW = (W - 2*M - labelColW) / dayLabels.length;
 
     // Header row
-    doc.setFill(...MID_GREEN);
-    doc.rect(M, y, W - 2*M, 19);
-    doc.setFill(255, 255, 255);
-    doc.setFont(true, 8);
-    doc.text(M + 7, y + 6, "Form");
-    for (let d = 0; d < dayLabels.length; d++) {
-      doc.text(M + labelColW + d * dayColW + 4, y + 6, dayLabels[d]);
+    d2.fillRect(M, y, W - 2*M, 19, C.midGreen);
+    d2.text(M + 7, y + 5, "Form", 8, fontBold, C.white);
+    for (let i = 0; i < dayLabels.length; i++) {
+      d2.text(M + labelColW + i * dayColW + 4, y + 5, dayLabels[i], 7.5, fontBold, C.white);
     }
-    y -= 22;
+    y += 22;
 
     const rh = 22;
     for (let i = 0; i < dailyBreakdown.length; i++) {
       const { label, days } = dailyBreakdown[i];
-      const isAlt = i % 2 === 0;
-      doc.setFill(...(isAlt ? ROW_ALT : [255,255,255]));
-      doc.rect(M, y, W - 2*M, rh);
-
-      doc.setFill(...DARK_TEXT);
-      doc.setFont(false, 8.5);
-      doc.text(M + 7, y + 7, label);
-
-      for (let d = 0; d < days.length; d++) {
-        const val = days[d];
-        const cx = M + labelColW + d * dayColW;
-        doc.setFill(...(val ? [212, 238, 216] : [250, 217, 213]));
-        doc.rect(cx, y + 1, dayColW - 2, rh - 2);
-        doc.setFill(...(val ? [26, 107, 42] : [178, 34, 34]));
-        doc.setFont(true, 10);
-        doc.textCentered(cx + (dayColW-2)/2, y + 6, val ? "Y" : "N", 6);
+      d2.fillRect(M, y, W - 2*M, rh, i % 2 === 0 ? C.rowAlt : C.white);
+      d2.text(M + 7, y + 7, label, 8, font, C.darkText);
+      for (let di = 0; di < days.length; di++) {
+        const val = days[di];
+        const cx = M + labelColW + di * dayColW;
+        d2.fillRect(cx, y + 1, dayColW - 2, rh - 2, val ? rgb(0.83,0.93,0.85) : rgb(0.98,0.85,0.84));
+        d2.textCentered(cx + (dayColW-2)/2, y + 6, val ? "Y" : "N", 9, fontBold, val ? rgb(0.1,0.42,0.16) : rgb(0.7,0.13,0.13));
       }
-
-      doc.setStroke(...DIVIDER);
-      doc.setLineWidth(0.4);
-      doc.line(M, y, M + W - 2*M, y);
-      y -= rh;
+      d2.line(M, y + rh, M + W - 2*M, y + rh, C.divider, 0.4);
+      y += rh;
     }
 
-    y -= 14;
+    y += 14;
 
     // Flags
-    drawSectionHeader(doc, M, y, W - 2*M, "FLAGS & NOTES");
-    y -= 24;
+    drawSectionHeader(d2, font, fontBold, M, y, W - 2*M, "FLAGS & NOTES");
+    y += 24;
 
     if (flags.length === 0) {
-      doc.setFill(...ROW_ALT);
-      doc.rect(M, y, W - 2*M, 22);
-      doc.setFill(...DARK_TEXT);
-      doc.setFont(false, 9);
-      doc.text(M + 12, y + 7, "No flags this week.");
-      y -= 22;
+      d2.fillRect(M, y, W - 2*M, 22, C.rowAlt);
+      d2.text(M + 12, y + 7, "No flags this week.", 9, font, C.darkText);
+      y += 22;
     } else {
       for (let i = 0; i < flags.length; i++) {
         const { form, note } = flags[i];
-        doc.setFill(...(i % 2 === 0 ? ROW_ALT : [255,255,255]));
-        doc.rect(M, y, W - 2*M, 22);
-        doc.setFill(...FLAG_RED);
-        doc.rect(M, y, 3, 22);
-        doc.setFill(...DARK_TEXT);
-        doc.setFont(true, 8);
-        doc.text(M + 9, y + 13, form + ":");
-        doc.setFont(false, 8);
-        doc.setFill(68, 68, 68);
-        doc.text(M + 9, y + 4, note);
-        doc.setStroke(...DIVIDER);
-        doc.setLineWidth(0.4);
-        doc.line(M, y, M + W - 2*M, y);
-        y -= 22;
+        d2.fillRect(M, y, W - 2*M, 22, i % 2 === 0 ? C.rowAlt : C.white);
+        d2.fillRect(M, y, 3, 22, C.flagRed);
+        d2.text(M + 9, y + 5, `${form}:`, 8, fontBold, C.darkText);
+        d2.text(M + 9, y + 14, note, 7.5, font, C.grey);
+        d2.line(M, y + 22, M + W - 2*M, y + 22, C.divider, 0.4);
+        y += 23;
       }
     }
 
-    y -= 14;
+    y += 14;
 
-    // Meeting notes
-    drawSectionHeader(doc, M, y, W - 2*M, "ONE-ON-ONE NOTES  (Nicole / CM)");
-    y -= 23;
-    const boxH = y - 30;
-    doc.setFill(250, 253, 248);
-    doc.rect(M, 30, W - 2*M, boxH);
-    doc.setStroke(...DIVIDER);
-    doc.setLineWidth(0.8);
-    doc.rect(M, 30, W - 2*M, boxH, false, true);
-
-    let lineY = y - 16;
-    doc.setStroke(221, 221, 221);
-    doc.setLineWidth(0.5);
-    while (lineY > 44) {
-      doc.line(M + 11, lineY, W - M - 11, lineY);
-      lineY -= 20;
+    // Meeting notes box
+    drawSectionHeader(d2, font, fontBold, M, y, W - 2*M, "ONE-ON-ONE NOTES  (Nicole / CM)");
+    y += 23;
+    const boxH = 792 - 18 - y - 10;
+    d2.fillRect(M, y, W - 2*M, boxH, C.notesBg);
+    d2.strokeRect(M, y, W - 2*M, boxH, C.divider, 0.8);
+    let lineY = y + 20;
+    while (lineY < y + boxH - 10) {
+      d2.line(M + 11, lineY, W - M - 11, lineY, C.lightGrey, 0.5);
+      lineY += 20;
     }
 
-    const pdfStr = doc.build();
-    const buf = Buffer.from(pdfStr, "latin1");
-
+    const pdfBytes = await pdfDoc.save();
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${foreman.replace(/ /g,"_")}_Scorecard.pdf"`);
-    res.status(200).send(buf);
+    res.status(200).send(Buffer.from(pdfBytes));
   } catch (e) {
+    console.error(e);
     res.status(500).json({ error: e.message });
   }
 }
