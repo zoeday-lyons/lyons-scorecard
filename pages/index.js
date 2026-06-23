@@ -83,7 +83,7 @@ export default function Home() {
       // Init manual counts for FLHA + extra forms
       const mc = {};
       const md = {};
-      for (const label of ["FLHA / Hazard Assessment", "Daily Job Notes", "Daily Job Photos"]) {
+      for (const label of ["Daily Job Notes", "Daily Job Photos"]) {
         mc[label] = "";
         md[label] = {};
         for (const d of weekDates) md[label][d] = false;
