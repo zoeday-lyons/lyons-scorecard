@@ -9,7 +9,7 @@ const FORM_LABELS = [
   "Truck Inspection Checklist",
 ];
 
-const MANUAL_FORMS = ["FLHA / Hazard Assessment", "Daily Job Notes", "Daily Job Photos"];
+const MANUAL_FORMS = ["Daily Job Notes", "Daily Job Photos"];
 const ALL_FORM_LABELS = [
   "4@12 Daily Check-In",
   "Truck Pre & Post Trip",
