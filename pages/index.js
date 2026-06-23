@@ -310,7 +310,7 @@ export default function Home() {
             <h3 style={subheadStyle}>Enter Manually</h3>
             <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px" }}>Check each day the form was submitted</p>
 
-            {["FLHA / Hazard Assessment", "Daily Job Notes", "Daily Job Photos"].map(label => (
+            {["Daily Job Notes", "Daily Job Photos"].map(label => (
               <div key={label} style={{ marginBottom: 20, padding: "14px 16px", background: "#f9fdf7", borderRadius: 8, border: "1px solid #d8ebc8" }}>
                 <div style={{ fontWeight: 600, fontSize: 13, color: "#2D5016", marginBottom: 10 }}>{label}</div>
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
