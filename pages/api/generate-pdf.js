@@ -61,7 +61,7 @@ function drawHeader(d, font, fontBold, weekLabel, pageNum) {
   text(39.6, 40, "LANDSCAPING", 8, font, rgb(0.66, 0.79, 0.54));
   textCentered(W/2, 18, "FOREMAN PERFORMANCE SCORECARD", 14, fontBold, C.white);
   textCentered(W/2, 36, `Week of ${weekLabel}`, 8.5, font, C.white);
-  textRight(W - 39.6, 22, `Page ${pageNum} of 2`, 8, font, C.white);
+  textRight(W - 39.6, 36, `Page ${pageNum} of 2`, 8, font, C.white);
 }
 
 function drawFooter(d, font) {
