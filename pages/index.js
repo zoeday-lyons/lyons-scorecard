@@ -10,15 +10,6 @@ const FORM_LABELS = [
 ];
 
 const MANUAL_FORMS = ["Daily Job Notes", "Daily Job Photos"];
-const ALL_FORM_LABELS = [
-  "4@12 Daily Check-In",
-  "Truck Pre & Post Trip",
-  "Equipment Pre & Post Trip",
-  "FLHA / Hazard Assessment",
-  "Truck Inspection Checklist",
-  "Daily Job Notes",
-  "Daily Job Photos",
-];
 
 function getMonday(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
@@ -54,13 +45,15 @@ function formatWeekLabel(days) {
 export default function Home() {
   const [foreman, setForeman] = useState("");
   const [weekStart, setWeekStart] = useState("");
-  const [step, setStep] = useState("setup"); // setup | fetching | manual | generating | done
+  const [step, setStep] = useState("setup");
   const [fetchedData, setFetchedData] = useState(null);
   const [manualCounts, setManualCounts] = useState({});
   const [manualDaily, setManualDaily] = useState({});
   const [error, setError] = useState(null);
+  const [manualFourDay, setManualFourDay] = useState(null);
 
-  const isFourDay = FOUR_DAY_FOREMEN.includes(foreman);
+  const isFourDay = manualFourDay !== null ? manualFourDay : FOUR_DAY_FOREMEN.includes(foreman);
+  const showScheduleToggle = !FOUR_DAY_FOREMEN.includes(foreman) && foreman !== "";
   const monday = weekStart ? getMonday(weekStart) : null;
   const weekDates = monday ? getWeekDates(monday, isFourDay) : [];
   const dayLabels = weekDates.map(formatDayLabel);
@@ -80,7 +73,6 @@ export default function Home() {
       if (!res.ok) throw new Error(data.error || "Fetch failed");
       setFetchedData(data);
 
-      // Init manual counts for FLHA + extra forms
       const mc = {};
       const md = {};
       for (const label of ["Daily Job Notes", "Daily Job Photos"]) {
@@ -101,10 +93,8 @@ export default function Home() {
     setStep("generating");
     setError(null);
     try {
-      // Build forms array (all forms including manual)
       const allForms = [];
 
-      // Auto-fetched forms
       for (const label of FORM_LABELS) {
         const d = fetchedData.results[label];
         allForms.push({
@@ -115,13 +105,11 @@ export default function Home() {
         });
       }
 
-      // Manual forms
       for (const label of ["Daily Job Notes", "Daily Job Photos"]) {
         const submitted = parseInt(manualCounts[label]) || 0;
         allForms.push({ label, submitted, possible: weekDates.length, error: null });
       }
 
-      // Build daily breakdown (all forms)
       const dailyBreakdown = [];
       for (const label of FORM_LABELS) {
         const d = fetchedData.results[label];
@@ -137,11 +125,9 @@ export default function Home() {
         });
       }
 
-      // Build flags
       const flags = [];
       for (const { label, submitted, possible } of allForms) {
         const missing = [];
-        // Find missing days for auto forms
         const idx = FORM_LABELS.indexOf(label);
         if (idx !== -1) {
           const d = fetchedData.results[label];
@@ -149,10 +135,8 @@ export default function Home() {
             if ((d.dailyCounts[date] || 0) === 0) missing.push(dayLabels[i]);
           });
         } else {
-          // manual
-          const manLabel = label;
           weekDates.forEach((date, i) => {
-            if (!manualDaily[manLabel]?.[date]) missing.push(dayLabels[i]);
+            if (!manualDaily[label]?.[date]) missing.push(dayLabels[i]);
           });
         }
         if (missing.length > 0 && missing.length < possible) {
@@ -205,12 +189,12 @@ export default function Home() {
     setFetchedData(null);
     setManualCounts({});
     setManualDaily({});
+    setManualFourDay(null);
     setError(null);
   }
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f7f1", fontFamily: "system-ui, sans-serif" }}>
-      {/* Header */}
       <div style={{ background: "#2D5016", padding: "20px 32px", display: "flex", alignItems: "center", gap: 16 }}>
         <div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 22, letterSpacing: 1 }}>LYONS</div>
@@ -222,16 +206,23 @@ export default function Home() {
 
       <div style={{ maxWidth: 720, margin: "40px auto", padding: "0 20px" }}>
 
-        {/* STEP 1: Setup */}
         {step === "setup" && (
           <div style={{ background: "white", borderRadius: 10, padding: 32, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
             <h2 style={{ margin: "0 0 24px", color: "#2D5016", fontSize: 18 }}>Generate Scorecard</h2>
 
             <label style={labelStyle}>Foreman</label>
-            <select value={foreman} onChange={e => setForeman(e.target.value)} style={selectStyle}>
+            <select value={foreman} onChange={e => { setForeman(e.target.value); setManualFourDay(null); }} style={selectStyle}>
               <option value="">— Select foreman —</option>
               {FOREMEN.map(f => <option key={f} value={f}>{f}</option>)}
             </select>
+
+            {showScheduleToggle && (
+              <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#2D5016" }}>Schedule this week:</span>
+                <button onClick={() => setManualFourDay(false)} style={{ ...scheduleBtn, background: !isFourDay ? "#2D5016" : "white", color: !isFourDay ? "white" : "#2D5016" }}>5-day (Mon–Fri)</button>
+                <button onClick={() => setManualFourDay(true)} style={{ ...scheduleBtn, background: isFourDay ? "#2D5016" : "white", color: isFourDay ? "white" : "#2D5016" }}>4-day (Mon–Thu)</button>
+              </div>
+            )}
 
             <label style={{ ...labelStyle, marginTop: 20 }}>Week Starting (pick any day in the week)</label>
             <input
@@ -261,7 +252,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* STEP 2: Fetching */}
         {step === "fetching" && (
           <div style={{ background: "white", borderRadius: 10, padding: 48, textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
             <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
@@ -270,13 +260,11 @@ export default function Home() {
           </div>
         )}
 
-        {/* STEP 3: Manual entry */}
         {step === "manual" && fetchedData && (
           <div style={{ background: "white", borderRadius: 10, padding: 32, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
             <h2 style={{ margin: "0 0 6px", color: "#2D5016", fontSize: 18 }}>Review & Complete</h2>
             <p style={{ margin: "0 0 24px", color: "#666", fontSize: 13 }}>{foreman} · {weekLabel}</p>
 
-            {/* Auto-fetched results */}
             <h3 style={subheadStyle}>Auto-Pulled from JotForm</h3>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 24 }}>
               <thead>
@@ -306,7 +294,6 @@ export default function Home() {
               </tbody>
             </table>
 
-            {/* Manual entry */}
             <h3 style={subheadStyle}>Enter Manually</h3>
             <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px" }}>Check each day the form was submitted</p>
 
@@ -324,7 +311,6 @@ export default function Home() {
                             ...prev,
                             [label]: { ...prev[label], [date]: e.target.checked }
                           }));
-                          // Update total count
                           const newDays = { ...(manualDaily[label] || {}), [date]: e.target.checked };
                           const total = Object.values(newDays).filter(Boolean).length;
                           setManualCounts(prev => ({ ...prev, [label]: String(total) }));
@@ -349,7 +335,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* STEP 4: Generating */}
         {step === "generating" && (
           <div style={{ background: "white", borderRadius: 10, padding: 48, textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
             <div style={{ fontSize: 32, marginBottom: 16 }}>📄</div>
@@ -357,7 +342,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* STEP 5: Done */}
         {step === "done" && (
           <div style={{ background: "white", borderRadius: 10, padding: 48, textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
             <div style={{ fontSize: 40, marginBottom: 16 }}>✅</div>
@@ -376,6 +360,7 @@ const selectStyle = { width: "100%", padding: "10px 12px", borderRadius: 6, bord
 const inputStyle = { width: "100%", padding: "10px 12px", borderRadius: 6, border: "1px solid #ccc", fontSize: 14, boxSizing: "border-box" };
 const btnStyle = { background: "#2D5016", color: "white", border: "none", borderRadius: 6, padding: "12px 24px", fontSize: 14, fontWeight: 600, cursor: "pointer" };
 const secondaryBtnStyle = { background: "white", color: "#2D5016", border: "1px solid #2D5016", borderRadius: 6, padding: "12px 24px", fontSize: 14, fontWeight: 600, cursor: "pointer" };
+const scheduleBtn = { border: "1px solid #2D5016", borderRadius: 6, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" };
 const errorStyle = { marginTop: 12, padding: "10px 14px", background: "#fdf2f2", border: "1px solid #f0c0c0", borderRadius: 6, color: "#c0392b", fontSize: 13 };
 const subheadStyle = { fontSize: 13, fontWeight: 700, color: "#2D5016", textTransform: "uppercase", letterSpacing: 0.5, margin: "0 0 12px", borderBottom: "2px solid #e8f2e0", paddingBottom: 6 };
 const thStyle = { padding: "8px 10px", textAlign: "left", fontWeight: 600, fontSize: 12 };
