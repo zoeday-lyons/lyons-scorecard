@@ -67,7 +67,7 @@ export default function Home() {
       const res = await fetch("/api/scorecard-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ foreman, startDate: monday, endDate }),
+        body: JSON.stringify({ foreman, startDate: monday, endDate, workingDays: weekDates.length }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Fetch failed");
