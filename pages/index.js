@@ -6,7 +6,6 @@ const FORM_LABELS = [
   "Truck Pre & Post Trip",
   "Equipment Pre & Post Trip",
   "FLHA / Hazard Assessment",
-  "Truck Inspection Checklist",
 ];
 
 const MANUAL_FORMS = ["Daily Job Notes", "Daily Job Photos"];
